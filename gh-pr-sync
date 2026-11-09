@@ -1,0 +1,117 @@
+#!/usr/bin/env bash
+# Copyright (c) 2026 MicroCore Tech
+# SPDX-License-Identifier: MIT
+#
+# Check out a GitHub PR into a fresh local branch and merge the latest base
+# branch from upstream into it.
+#
+# Usage:
+#   gh pr-sync <PR number | PR URL> [--base <branch>] [--reset]
+#
+# Options:
+#   --base <branch>  base branch to merge (default: the PR's base branch)
+#   --reset          discard uncommitted changes (git reset --hard) without asking
+#
+# Examples:
+#   gh pr-sync 16935
+#   gh pr-sync https://github.com/kubernetes-sigs/kueue/pull/16935
+#   gh pr-sync 16935 --base main
+#   gh pr-sync 16935 --reset
+#
+# Environment:
+#   UPSTREAM_REMOTE  remote to merge from (default: upstream)
+
+set -euo pipefail
+
+UPSTREAM_REMOTE="${UPSTREAM_REMOTE:-upstream}"
+
+die() { echo "error: $*" >&2; exit 1; }
+log() { echo "==> $*"; }
+
+usage() {
+  sed -n '5,22p' "$0" | sed 's/^# \{0,1\}//'
+  exit "${1:-0}"
+}
+
+[[ $# -ge 1 ]] || usage 1
+
+arg=""
+base=""
+reset=false
+while [[ $# -gt 0 ]]; do
+  case "$1" in
+    -h|--help) usage 0 ;;
+    --base) [[ $# -ge 2 ]] || die "--base requires a value"; base="$2"; shift 2 ;;
+    --reset) reset=true; shift ;;
+    *) [[ -z "$arg" ]] || die "unexpected argument: $1"; arg="$1"; shift ;;
+  esac
+done
+
+repo=""
+if [[ "$arg" =~ github\.com/([^/]+/[^/]+)/pull/([0-9]+) ]]; then
+  repo="${BASH_REMATCH[1]}"
+  pr="${BASH_REMATCH[2]}"
+elif [[ "$arg" =~ ^#?([0-9]+)$ ]]; then
+  pr="${BASH_REMATCH[1]}"
+else
+  die "expected a PR number or URL, got: $arg"
+fi
+
+git rev-parse --git-dir >/dev/null 2>&1 || die "not inside a git repository"
+git remote get-url "$UPSTREAM_REMOTE" >/dev/null 2>&1 || die "remote '$UPSTREAM_REMOTE' not found"
+
+if [[ -z "$repo" ]]; then
+  upstream_url="$(git remote get-url "$UPSTREAM_REMOTE")"
+  if [[ "$upstream_url" =~ github\.com[:/]([^/]+/[^/]+)$ ]]; then
+    repo="${BASH_REMATCH[1]%.git}"
+  else
+    die "cannot derive GitHub repo from '$UPSTREAM_REMOTE' URL: $upstream_url"
+  fi
+fi
+
+if ! git diff --quiet || ! git diff --cached --quiet; then
+  if ! $reset; then
+    git status --short --untracked-files=no >&2
+    answer=""
+    if (: </dev/tty) 2>/dev/null; then
+      read -r -p "Working tree has uncommitted changes. Run 'git reset --hard'? [y/N] " answer </dev/tty || true
+    fi
+    [[ "$answer" =~ ^[Yy]([Ee][Ss])?$ ]] || die "working tree has uncommitted changes; commit or stash them first, or pass --reset"
+  fi
+  log "Discarding uncommitted changes (git reset --hard)"
+  git reset --hard
+fi
+
+log "Fetching metadata for $repo#$pr"
+read -r head_ref base_ref state < <(
+  gh pr view "$pr" -R "$repo" --json headRefName,baseRefName,state \
+    -q '[.headRefName, .baseRefName, .state] | @tsv'
+)
+[[ -n "$head_ref" ]] || die "could not read PR $pr"
+[[ "$state" == "OPEN" ]] || echo "warning: PR $pr is $state" >&2
+base="${base:-$base_ref}"
+
+# Never overwrite a local base/release branch when the PR comes from a fork's main.
+branch="$head_ref"
+case "$branch" in
+  main|master|release-*) branch="pr-$pr-$head_ref" ;;
+esac
+
+if git show-ref --verify --quiet "refs/heads/$branch"; then
+  log "Local branch '$branch' exists; it will be reset to the PR head"
+fi
+
+log "Checking out PR $pr into '$branch'"
+gh pr checkout "$pr" -R "$repo" --branch "$branch" --force
+
+log "Fetching $UPSTREAM_REMOTE/$base"
+git fetch "$UPSTREAM_REMOTE" "$base"
+
+log "Merging $UPSTREAM_REMOTE/$base into '$branch'"
+if ! git merge --no-edit "$UPSTREAM_REMOTE/$base"; then
+  echo >&2
+  echo "Merge has conflicts. Resolve them and run 'git commit', or 'git merge --abort'." >&2
+  exit 1
+fi
+
+log "Done: on '$(git branch --show-current)', merged with $UPSTREAM_REMOTE/$base"
