@@ -1,0 +1,23 @@
+README.md
+  s_bc52e6aa7d3d71::t_81e79407ba3a04 1-94
+gh-pr-sync
+  s_bc52e6aa7d3d71::t_b80b27e3c1d6bb 1-117
+.gitignore
+  s_bc52e6aa7d3d71::t_3f18ac9bf06670 1
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "8f8ae3822b848173f2a09fad66a2ada457c2f9bb",
+  "prompts": {},
+  "sessions": {
+    "s_bc52e6aa7d3d71": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "f91114c2-d457-4a67-8fcd-8493c52305dd",
+        "model": "claude-opus-5-5"
+      },
+      "human_author": "Mykhailo Bobrovskyi <mikhail.bobrovsky@gmail.com>"
+    }
+  }
+}
