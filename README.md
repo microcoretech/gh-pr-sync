@@ -89,6 +89,14 @@ gh extension install .
 This links the installed extension to the local checkout, so edits take effect
 immediately.
 
+Tests use [bats-core](https://github.com/bats-core/bats-core) and do not need
+network access or a real `gh`:
+
+```bash
+brew install bats-core   # or: apt-get install bats
+make test
+```
+
 ## License
 
 [MIT](LICENSE)

@@ -1,0 +1,46 @@
+#!/usr/bin/env bash
+# Copyright (c) 2026 MicroCore Tech
+# SPDX-License-Identifier: MIT
+#
+# Fake gh used by the tests. Logs every call to $GH_LOG and emulates the two
+# subcommands gh-pr-sync relies on:
+#
+#   gh pr view <pr> -R <repo> --json ... -q ...
+#     prints "$FAKE_PR_HEAD\t$FAKE_PR_BASE\t$FAKE_PR_STATE"; fails if
+#     FAKE_PR_HEAD is empty
+#   gh pr checkout <pr> -R <repo> --branch <branch> --force
+#     fetches refs/pull/<pr>/head from $FAKE_PR_REMOTE into <branch>
+
+set -euo pipefail
+
+echo "gh $*" >>"$GH_LOG"
+
+[[ "${1:-}" == "pr" ]] || { echo "fake gh: unsupported command: $*" >&2; exit 2; }
+
+case "${2:-}" in
+  view)
+    if [[ -z "${FAKE_PR_HEAD:-}" ]]; then
+      echo "GraphQL: Could not resolve to a PullRequest with the number of $3." >&2
+      exit 1
+    fi
+    printf '%s\t%s\t%s\n' "$FAKE_PR_HEAD" "$FAKE_PR_BASE" "${FAKE_PR_STATE:-OPEN}"
+    ;;
+  checkout)
+    pr="$3"
+    branch=""
+    shift 3
+    while [[ $# -gt 0 ]]; do
+      case "$1" in
+        --branch) branch="$2"; shift 2 ;;
+        *) shift ;;
+      esac
+    done
+    [[ -n "$branch" ]] || { echo "fake gh: --branch is required" >&2; exit 2; }
+    git fetch -q "${FAKE_PR_REMOTE:-upstream}" "refs/pull/$pr/head"
+    git checkout -q -B "$branch" FETCH_HEAD
+    ;;
+  *)
+    echo "fake gh: unsupported command: $*" >&2
+    exit 2
+    ;;
+esac
